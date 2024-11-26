@@ -1,0 +1,14 @@
+# Python dependencies
+venv/
+__pycache__/
+*.pyc
+*.bin
+*.ckpt
+*.pt
+*.pth
+*.h5
+models/
+*.cache
+transformers_cache/
+
+
