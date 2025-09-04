@@ -5,37 +5,28 @@ from langchain_ollama.llms import OllamaLLM
 
 manager = solara.reactive([])
 
-@solara.component
-def get_ai_chat(chain:OllamaLLM, current_mess:str):
-    # print('current_mess', current_mess)
-    if current_mess == '':
-        manager.set(manager.get()+[{
-        'user' : current_mess,
-        'ai' : 'Please enter a message'
-        }])
-        return lab.ChatMessage(children=[solara.Markdown(md_text='Please enter a message')], user=False)
-    ai_mess = chain.invoke(current_mess)
-    manager.set(manager.get()+[{
-        'user' : current_mess,
-        'ai' : ai_mess
-    }])
-    return lab.ChatMessage(children=[solara.Markdown(md_text=ai_mess)], user=False)
+# Hàm gọi AI, chỉ trả về text
+def get_ai_chat(chain: OllamaLLM, current_mess: str) -> str:
+    if current_mess.strip() == "":
+        return "Please enter a message"
+    return chain.invoke(current_mess)
 
-# async def async_get_ai_chat(chain=OllamaLLM, current_mess: str):
-#     return await sync_to_async(get_ai_chat)(chain, current_mess)
+# Lấy lại lịch sử chat cũ
 def get_old_mess():
     old_mess = []
     for mess in manager.get():
-        user_chat = lab.ChatMessage(children=[
-            solara.Markdown(md_text=mess['user']),
-        ],
-        user=True) 
-        ai_chat = lab.ChatMessage(children=[
-            solara.Markdown(md_text=mess['ai']),
-        ],
-        user=False) , 
+        user_chat = lab.ChatMessage(
+            children=[solara.Markdown(md_text=mess['user'])],
+            user=True
+        )
+        ai_chat = lab.ChatMessage(
+            children=[solara.Markdown(md_text=mess['ai'])],
+            user=False
+        )
         old_mess.extend([user_chat, ai_chat])
     return old_mess
+
+
 @solara.component
 def show_chat(
     mess_reactive: solara.Reactive,
@@ -44,25 +35,39 @@ def show_chat(
     list_message_chatbot_reactive: solara.Reactive = None,
 ):
     chain = config_model['prompt'] | config_model['model']
+
+    # gọi model async
     get_ai_chat_response: Task = use_task(
-            #lambda chain=chain, current_mess=mess_reactive.value:
-            lambda: get_ai_chat(chain=chain, current_mess=mess_reactive.value),
-            dependencies=[mess_reactive.value]
-    )
-    solara.use_effect(
-        lambda: print('mess_reactive', mess_reactive.value),
+        lambda: get_ai_chat(chain=chain, current_mess=mess_reactive.value),
         dependencies=[mess_reactive.value]
     )
+
+    # Debug (in ra mỗi lần có message mới)
+    solara.use_effect(
+        lambda: print("User message:", mess_reactive.value),
+        dependencies=[mess_reactive.value]
+    )
+
+    old_mess = get_old_mess()
+
     if get_ai_chat_response.finished:
-        old_mess = get_old_mess()
+        ai_mess = get_ai_chat_response.result.value
+
+        # chỉ update manager 1 lần sau khi task xong
+        if not manager.get() or manager.get()[-1]["user"] != mess_reactive.value:
+            manager.set(manager.get() + [{
+                "user": mess_reactive.value,
+                "ai": ai_mess
+            }])
+
         return lab.ChatBox(children=[
-            *old_mess,
-            get_ai_chat_response.result.value
+            *get_old_mess()
         ])
+
     else:
-        old_mess = get_old_mess()
+        # đang chờ AI trả lời → hiển thị user msg + loading
         return lab.ChatBox(children=[
             *old_mess,
-            lab.ChatMessage(children=[mess_reactive.value], user = True),
-            solara.ProgressLinear(value= get_ai_chat_response.progress)
+            lab.ChatMessage(children=[mess_reactive.value], user=True),
+            solara.ProgressLinear(value=get_ai_chat_response.progress)
         ])
